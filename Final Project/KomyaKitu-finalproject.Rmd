@@ -1,0 +1,859 @@
+---
+title: "Time Series Analysis: Final Project"
+subtitle: <h1>Statistics 170 with Professor Juana Sanchez</h1>
+author: 
+  - "Written by Kitu Komya"
+  - "UID: 404-491-375"
+date: "November 30, 2018"
+output: 
+  pdf_document:
+    latex_engine: xelatex
+    toc: true
+    toc_depth: 3
+    number_sections: true
+classoption: titlepage
+header-includes:
+- \usepackage{fancyhdr}
+- \pagestyle{fancy}
+- \fancyhf{}
+- \rhead{Page \thepage}
+- \lhead{\leftmark}
+- \cfoot{}
+- \usepackage{sectsty}
+- \usepackage{hyperref}
+- \definecolor{rpink}{RGB}{248, 118, 109}
+- \definecolor{rgreen}{RGB}{0, 186, 56}          
+- \definecolor{rblue}{RGB}{97, 156, 255}
+- \sectionfont{\color{rblue}}
+- \subsectionfont{\color{rpink}}
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F)
+```
+
+\newpage
+
+# Introduction
+## Goal
+The goal of this paper is to understand when certain forecasts are better and more accurate in predicting the future. Time series analysis is a method of modelling data in the form of time series by using its past data points. Several different models exist in time series forecasting, and this paper will examine three of the most commonly used ones: SARIMA + GARCH, Regression with Autocorrelated Errors, and VAR.
+\newline
+\newline
+
+## SARIMA + GARCH Model
+The SARIMA model only uses historical information of the time series, and the SARIMA + GARCH is an extension of SARIMA by modelling the heteroskedastic variance of the residuals.
+\newline
+\newline
+
+## Regression with Autocorrelated Errors Model
+Regression with Autocorrelated Errors utilizes a traditional regression model in forecasting a dependent variable by also using other exogenous variables, dummy variables for seasonality, or a polynomial trend for trend. To account for the autocorrelated errors, the residuals of such a model will be modelled by an ARIMA model, which is the approach used in GLS to approach regression with autocorrelated errors.
+\newline
+\newline
+
+## VAR Model
+Finally, the VAR model is employed when the forecasted variable is both an independent and dependent variable, in which it depends on past values of itself along with past values of other variables which are also both dependent and independent.
+\newline
+\newline
+
+
+## "Consensus" Forecast
+This paper will find the most optimal models for each of the three aforementioned models and average their forecasts to attain a "consensus" forecast. Consensus forecasts combine several, different forecasts, which benefit due to diversification gains and reduce the forecast errors of the individual forecasts.
+\newline
+\newline
+
+## Application
+Understanding the mathematical and practical intuition behind these three techniques is vital in time series analyses. Such analyses arise across multiple domains, such as in economics and meteorology. Such areas that try predicting the future use multiple forecasts to obtain an average for times t + 1 and onward to ensure the most likely, consensus forecast. Similarly, this paper will conclude with a consensus forecast and compare its forecast with the actual, observed predictions to learn when certain forecasts are more accurate.
+
+\newpage
+# Describing the Data
+
+## Description
+In order to answer our question posed in Section 1, economy data will be used. The variable to forecast is housing starts in the United States. Housing starts is considered to be a leading indicator of what might come next in the economy. Economists believe that if housing construction starts flourishing, it indicates that prosperity will come. Unemployment rate and Women's unemployment rate will also be considered. This data comes from FRED (Federal Reserve Economic Data, https://fred.stlouisfed.org). The data starts on January 1, 1959 and ends on August 1, 2018. Each data point for the three variables are collected monthly.
+\newline
+\newline
+
+```{r, echo = F, warning = F, message = F}
+library(knitr)
+library(kableExtra)
+library(dplyr)
+library(pander)
+
+# create descriptions for table in dataframe format
+var_name <- c("HOUSTNSA", "LNU04000002", "UNRATENSA")
+r_name <- c("hs", "uw", "ur")
+description <- c("Housing Starts is the total # of new, privately owned housing units (in thousands), measured monthly; not seasonally adjusted; this is variable to be forecasted", "Women's Unemployment Rate (in percent) measured monthly; not seasonally adjusted & Jan 1, 1959 to Aug 1, 2017 & UNRATENSA & ur & Civilian Unemployment Rate (in percent) measured monthly; not seasonally adjusted", "Civilian Unemployment Rate (in percent) measured monthly; not seasonally adjusted")
+train <- rep("Jan 1, 1959 to Aug 1, 2017", 3)
+test <- c("Sept 1, 2017 to Aug 1, 2019", "", "")
+datatable <- data.frame(var_name, r_name, description, train, test)
+
+# read in data
+dat <- read.table("http://www.stat.ucla.edu/~jsanchez/data/hwk6data.csv", sep = ",", header = T)
+
+# clean variable names
+names(dat) <- c("hs", "uw", "ur")
+
+# training and testing data
+dat_train <- dat[1:704, ]
+dat_test <- dat$hs[705:716]
+```
+
+
+## Summary of Data
+```{r, warning = F}
+datatable %>%
+  kable() %>%
+  column_spec(3:5, width = c("15em", "7em", "7em"))
+```
+Table 1. Summary of the three variables used in the dataset.
+
+\newpage
+# Descriptive Analysis of the Data
+## Decomposition of the Time-Series' Variables
+A descriptive analysis of the dataset will provide further insight into which forecasting methods will work best.
+
+```{r, echo = F, message = F, warning = F, results = F}
+# create time series object
+dat_train.ts <- ts(data = dat_train, start = c(1959, 1), end = c(2017, 8), frequency = 12)
+
+# look at a section of the data
+head(dat_train.ts)
+
+# look at statistics of the data
+start(dat_train.ts) # data starts in January 1959
+end(dat_train.ts) # data ends in August 2018
+frequency(dat_train.ts) # data is collected monthly
+
+# decompose time series
+dat_train.ts.decompose <- decompose(dat_train.ts)
+```
+
+```{r, fig.show = "asis"}
+par(mfrow = c(2, 3))
+
+# timeplots (observed) of each variable
+plot(dat_train.ts.decompose$x[ , 1], main = "Time Plot of \nHousing Starts (hs)", 
+     xlab = "Year", ylab = "# of new private houses (in 1000s)", col = "#F8766D", lwd = 0.8)
+plot(dat_train.ts.decompose$x[ , 2], main = "Time Plot of Women's \nUnemployment Rate (uw)", 
+     xlab = "Year", ylab = "Women's unemployment rate (in %)", col = "#00BA38", lwd = 0.8)
+plot(dat_train.ts.decompose$x[ , 3], main = "Time Plot of Civilian \nUnemployment Rate (ur)", 
+     xlab = "Year", ylab = "Civilian unemployment rate (in %)", col = "#619CFF", lwd = 0.8)
+
+# trends of each variable
+plot(dat_train.ts.decompose$trend[ , 1], main = "Trend of \nHousing Starts (hs)", 
+     xlab = "Year", ylab = "# of new private houses (in 1000s)", col = "#F8766D", lwd = 2)
+plot(dat_train.ts.decompose$trend[ , 2], main = "Trend of Women's \nUnemployment Rate (uw)", 
+     xlab = "Year", ylab = "Women's unemployment rate (in %)", col = "#00BA38", lwd = 2)
+plot(dat_train.ts.decompose$trend[ , 3], main = "Trend of Civilian \nUnemployment Rate (ur)", 
+     xlab = "Year", ylab = "Civilian unemployment rate (in %)", col = "#619CFF", lwd = 2)
+```
+Figure 1. Time plots and trends of the three variables.
+\newline
+\newline
+
+```{r}
+# create descriptions for table in dataframe format
+plot_type <- c("Time Plot", "Trend")
+hs <- c("seasonal and cyclical component evident; large, constant variances; no general trend; not stationary; dip before 2010", "cyclical component evident; large, somewhat varying variances; no general trend; dip before 2010")
+uw <- c("seasonal and cyclical component evident; somewhat constant variances; no general trend; not stationary", "cyclical component evident; somewhat constant variances; sinusoidal trend")
+ur <- c("seasonal and cyclical component evident; somewhat constant variances; no general trend; not stationary", "cyclical component evident; somewhat constant variances; sinusoidal trend")
+datatable <- data.frame(plot_type, hs, uw, ur)
+
+datatable %>%
+  kable() %>%
+  column_spec(2:4, width = "12em")
+```
+Table 2. Interpreting the timeplots and trends from Figure 1.
+
+```{r}
+par(mfrow = c(2, 3))
+boxplot(hs ~ cycle(dat_train.ts), data = dat_train.ts, main = "Seasonal Boxplot of \nHousing Starts (hs)", 
+        xlab = "Month", ylab = "# of new private houses (in 1000s)", col = "#F8766D")
+boxplot(uw ~ cycle(dat_train.ts), data = dat_train.ts, main = "Seasonal Boxplot of Women's \nUnemployment Rate (uw)", 
+        xlab = "Month", ylab = "Women's unemployment rate (in %)", col = "#00BA38")
+boxplot(ur ~ cycle(dat_train.ts), data = dat_train.ts, main = "Seasonal Boxplot of Civilian \nUnemployment Rate (ur)",
+        xlab = "Month", ylab = "Civilian unemployment rate (in %)", col = "#619CFF")
+
+# random parts of each variable
+plot(dat_train.ts.decompose$random[ , 1], main = "Random Part of \nHousing Starts (hs)", 
+     xlab = "Year", ylab = "# of new private houses (in 1000s)", col = "#F8766D", lwd = 0.8)
+plot(dat_train.ts.decompose$random[ , 2], main = "Random Part of Women's \nUnemployment Rate (uw)", 
+     xlab = "Year", ylab = "Women's unemployment rate (in %)", col = "#00BA38", lwd = 0.8)
+plot(dat_train.ts.decompose$random[ , 3], main = "Random Part of Civilian \nUnemployment Rate (ur)", 
+     xlab = "Year", ylab = "Civilian unemployment rate (in %)", col = "#619CFF", lwd = 0.8)
+```
+Figure 2. Seasonal boxplots and random parts of the three variables.
+\newline
+\newline
+
+```{r}
+# create descriptions for table in dataframe format
+plot_type <- c("Seasonal Box Plot", "Random Plot")
+hs <- c("seasonal component evident; arches to June then dips down; larger variances in summer months", "mean stationary, but variance decreases with time")
+uw <- c("relatively stationary, but a slight peak in June after which it decreases; larger variance in summer months", "mean and variance stationary")
+ur <- c("relatively stationary, but slightly decreases over the year; constant variance", "mean and variance stationary")
+datatable <- data.frame(plot_type, hs, uw, ur)
+
+datatable %>%
+  kable() %>%
+  column_spec(2:4, width = "12em")
+```
+Table 3. Interpreting the seasonal boxplots and random parts from Figure 2. 
+\newline
+\newline
+
+\newpage
+## Unit Root and Cointegration Tests
+```{r, echo = F, results = F, message = F, warning = F}
+# unit root tests
+library(tseries)
+
+adf.test(dat_train$hs)
+adf.test(dat_train$uw)
+adf.test(dat_train$ur)
+
+
+# cointegration tests
+po.test(cbind(dat_train$hs, dat_train$uw, dat_train$ur))
+```
+```{r}
+# create descriptions for table in dataframe format
+unit_root_hs <- c("0.2943")
+unit_root_uw <- c("0.119")
+unit_root_ur <- c("0.09635")
+cointegration_test <- c("< 0.01")
+datatable <- data.frame(unit_root_hs, unit_root_uw, unit_root_ur, cointegration_test)
+
+datatable %>%
+  kable()
+```
+Table 4. p-values of the unit root tests for each variable as well as for the cointegration test among all the variables.
+\newline
+
+Based off Table 4, since the p-values for all of the variables are larger than 0.05 for the unit tests, we fail to reject the null hypothesis of the Augmented Dickey-Fuller Test. Thus, all three variables are random walks because at least one of their roots is equal to 1, signifying a random walk process. Moreover, because in Phillips-Ouliaris test for cointegration the p-value is less than 0.05, we reject the null hypothesis. Thus, the three random walks are cointegrated. This means that the three variables are related by a stationary linear combination and share an underlying stochastic trend.
+\newline
+\newline
+
+## Volatility Check for GARCH Model
+```{r}
+# volatility for GARCH models
+par(mfrow = c(2, 3))
+acf(dat_train$hs - mean(dat_train$hs), main = "ACF of Adjusted \nHousing Starts (hs)")
+acf(dat_train$uw - mean(dat_train$uw), main = "ACF of Adjusted \nUnemployment Rates (uw)")
+acf(dat_train$ur - mean(dat_train$ur), main = "ACF of Adjusted Civilian \nUnemployment Rates (ur)")
+
+# volatility of squared mean
+acf((dat_train$hs - mean(dat_train$hs))^2, main = "ACF of Squared \nMean Adjusted of hs")
+acf((dat_train$uw - mean(dat_train$uw))^2, main = "ACF of Squared \nMean Adjusted of uw")
+acf((dat_train$ur - mean(dat_train$ur))^2, main = "ACF of Squared \nMean Adjusted of ur")
+
+```
+Figure 3. ACFs of adjusted variables and of squared mean adjusted variables.
+\newline
+
+From Figure 3, there is no suggestion of volatility in our data. Although the ACFs of the squared mean adjusted of the time series have significant lags, the ACFs of our variables in the time series are not white noise. Since both conditions have not been met, no volatility, or random periods of increased variance, exists in our time series. This conclusion is consistent from our interpretations of the time plots and trends from Table 2.
+
+\newpage
+## Dependencies of Variables Endogenously
+```{r}
+# check correlograms and partial correlograms
+acf(dat_train)
+```
+Figure 4. ACFs and CCFs of the three variables.
+\newline
+
+From Figure 4, we see that because none of the three variables have stationary ACFs, we will need to eventually difference the time series. Moreover, because of the significant autocorrelations in the CCFs, there are dependencies of the variables among each other, making them endogenous and dependent to each other. 
+
+\newpage
+# Modelling SARIMA + GARCH
+## Differencing the Time-Series
+In order to model SARIMA, we must model using a stationary time-series. As evidenced from Figure 3, the time-series is non-stationary as there are several significant auto-correlations. Thus, we will difference our data to achieve stationarity and to identify a model.
+
+```{r}
+par(mfrow = c(3, 2))
+
+# first difference
+reg.diff = diff(dat_train.ts[ , 1], lag = 1, diff = 1)
+plot(reg.diff, main = "Time Plot of regular \ndifferencing of hs")
+acf(reg.diff, lag = 50, main = "ACF of regular \ndifferencing of hs")
+
+# seasonal difference
+seas.diff = diff(dat_train.ts[ , 1], lag = 12, diff = 1)
+plot(seas.diff, main = "Time Plot of seasonal \ndifferencing of hs")
+acf(seas.diff, lag = 50, main = "ACF of seasonal \ndifferencing of hs")
+
+# seasonal difference of the regular difference
+seas.reg.diff = diff(reg.diff, lag = 12, diff = 1)
+plot(seas.reg.diff, main = "Time Plot of seasonal + regular \ndifferencing of hs")
+acf(seas.reg.diff, lag = 50, main = "ACF of seasonal + regular \ndifferencing of hs")
+```
+Figure 5. Time plots and ACFs of three differenced time-series.
+\newline
+\newline
+
+```{r}
+# create descriptions for table in dataframe format
+differencing_type <- c("Regular", "Seasonal", "Seasonal + Regular")
+time_plot <- c("relatively mean stationary but not variance stationary", "neither mean nor variance stationary", "mean and variance stationary")
+ACF <- c("not white noise; seasonal/cyclical trend apparent; many significant autocorrelations", "not white noise; many significant autocorrelations", "relatively white noise; few significant autocorrelations due to chance")
+datatable <- data.frame(differencing_type, time_plot, ACF)
+
+datatable %>%
+  kable() %>%
+  column_spec(2:3, width = "17em")
+```
+Table 5. Interpretation of time plots and ACFs of three differenced time-series from Figure 5.
+\newline
+
+Table 5 suggests that the best difference which leads to stationary data is the seasonal + regular differencing. No pre-transformation is needed because the variance does not increase with time of the original time-series, as seen in Figure 3.
+
+## Identification of SARIMA Model
+```{r}
+# identification of SARIMA model
+par(mfrow = c(1, 2))
+acf(seas.reg.diff, lag = 50, main = "ACF of seasonal + regular \ndifferencing of hs")
+pacf(seas.reg.diff, lag = 50, main = "PACF of seasonal + regular \ndifferencing of hs")
+```
+Figure 6. ACF and PACF of seasonal + regular differenced time-series.
+\newline
+
+Now that we have made our time-series stationary, we may identify a SARIMA model from its ACF and PACF. As evidenced by Figure 6, we will identify a $\sf{SARIMA(0, 1, 1)(1, 1, 1)_{12}}$ model. 
+
+Regular part: We will justify this model selection by first explaining the ARIMA(0, 1, 1) part. When looking at the ACF plot, there is a sharp, significant autocorrelation at lag 1, indicating an MA(1) process. From the PACF plot, we see that the autocorrelations die quickly over many lags, which is typical of MA behaviors for the regular part of SARIMA. No AR structure is identified. 
+
+Seasonal part: Moreover, in looking at the seasonal part of the SARIMA model, we notice significant autocorrelated spikes at the seasonal lags in both the ACF and the PACF, indicating both AR(1) and MA(1) in the seasonality.
+\newpage
+
+## Fit SARIMA Model
+```{r}
+# create SARIMA model by looking at the ACFs and PACFs
+model_sarima = arima(dat_train.ts[ , 1], order = c(0, 1, 1), 
+               seas = list(order = c(1, 1, 1), 12))
+
+# check residuals
+acf(resid(model_sarima), na.action = na.pass, main = "ACF of Residuals of SARIMA Model")
+```
+```{r, echo = F, results = F}
+# Ljung-Box test for white noise residuals
+Box.test(model_sarima$residuals, lag = 20, type = "Ljung")
+```
+Figure 7. ACF of residuals of SARIMA model.
+\newline
+
+The plot from Figure 7 shows that the model residuals approximately demonstrate white noise, since the only significant autocorrelations are due to chance. Using the Ljung-Box test in conjunction, we find that although we reject the null hypothesis, the p-value is 0.02123, and the test in itself requires a lot of power and assumptions. For our purposes, visually inspecting the ACF demonstrates that our model is ready to be forecasted.
+\newpage
+
+## Volatility Check of Residuals for GARCH Model
+Since the residuals model white noise, it's worth looking at the volatility of the residuals to determine whether fitting a SARIMA + GARCH is required.
+\newline
+```{r, results = F}
+# Ljung-Box tests
+Box.test(model_sarima$residuals, lag = 20, type = "Ljung")
+Box.test(model_sarima$residuals^2, lag = 20, type = "Ljung")
+```
+
+```{r}
+# volatility check of residuals for GARCH models
+par(mfrow = c(1, 2))
+acf(resid(model_sarima), main = "ACF of Residuals for \nSARIMA Model")
+
+# volatility of squared mean
+acf(resid(model_sarima)^2, main = "ACF of Squared Residuals \nfor SARIMA Model")
+```
+Figure 8. Volatility checking of residuals of SARIMA model.
+\newline
+
+The residuals of the ACF in the SARIMA model model white noise with significant autocorrelations being due to chance, as mentioned earlier. Moreover, the squared residuals of the ACF of the SARIMA model has many significant autocorrelations, suggesting that the residuals should be modeled by a GARCH to treat the varying variance.
+\newline
+\newline
+
+## Fit SARIMA + GARCH Model
+```{r, warning = F}
+# fit a SARIMA + GARCH model
+model_garch1 <- garch(model_sarima$residuals, order = c(0, 1), trace = F)
+model_garch2 <- garch(model_sarima$residuals, order = c(1, 0), trace = F)
+model_garch3 <- garch(model_sarima$residuals, order = c(1, 1), trace = F)
+model_garch4 <- garch(model_sarima$residuals, order = c(0, 2), trace = F)
+
+# create descriptions for table in dataframe format
+GARCH_model <- c("GARCH(0, 1)", "GARCH(1, 0)", "GARCH(1, 1)", "GARCH(0, 2)")
+AIC <- c(AIC(model_garch1), AIC(model_garch2), AIC(model_garch3), AIC(model_garch4))
+datatable <- data.frame(GARCH_model, AIC)
+
+# create table
+datatable %>%
+  kable()
+```
+
+Table 6. AIC values for four common GARCH models fit onto SARIMA.
+\newline
+
+From Table 6 we see that the SARIMA + GARCH model with the lowest AIC and thus most optimal is GARCH(1, 1). Let's visualize what the ACF plots of the residuals and the squared residuals look like now.
+
+```{r, results = F, warning = F, echo = F}
+# Ljung-Box test on the SARIMA + GARCH residuals
+Box.test(model_garch3$residuals, lag = 20, type = "Ljung")
+Box.test(model_garch3$residuals^2, lag = 20, type = "Ljung")
+```
+
+## Volatility Re-Check of SARIMA + GARCH Model
+```{r}
+# volatility check of SARIMA + GARCH model
+par(mfrow = c(1, 2))
+acf(resid(model_garch3), na.action = na.pass, main = "ACF of Residuals for \nSARIMA + GARCH Model")
+
+# volatility of squared mean
+acf(resid(model_garch3)^2, na.action = na.pass, main = "ACF of Squared Residuals \nfor SARIMA + GARCH Model")
+```
+Figure 9. ACFs of residuals and of squared residuals for SARIMA + GARCH model.
+\newline
+
+Wonderful. Figure 9 demonstrates that after adding a GARCH component onto the residuals after a SARIMA model, the residuals and the squared residuals are white noise. With p-values of 0.03062 and 0.9397 respectively for the residuals and squared residuals for the Ljung-Box test demonstrate reasonable white noise. 
+\newpage
+
+## SARIMA Model Equation in Polynomial Form
+
+The equation of our $\sf{SARIMA(0, 1, 1)(1, 1, 1)_{12}}$ model in polynomial form will be detailled below:
+
+
+$(1 - \sf{\alpha_{12}}*B^{12})(1 - B^{12})(1 - B)\sf{x_{t}} = (1 - \sf{\beta_{1}}*B)(1 - \sf{\beta_{12}}B^{12})\sf{w_{t}}$
+
+ 
+$(1 - (0.1405) * B^{12})(1 - B^{12})(1 - B)\sf{x_{t}} = (1 - (-0.3363)*B)(1 - (-0.8885)B^{12})\sf{w_{t}}$
+
+
+$(-1.686 * B^{25})\sf{x_{t}} + (1.686*B^{24})\sf{x_{t}} + (2.686*B^{13})\sf{x_{t}} - (2.686*B^{12})\sf{x_{t}} - B\sf{x_{t}} + \sf{x_{t}} = (3.58563 * B^{13})\sf{w_{t}} + (10.662 * B^{12})\sf{w_{t}} + (0.3363 * B)\sf{w_{t}} + \sf{w_{t}}$
+\newline
+\newline
+
+## Forecasting SARIMA Model
+Because SARIMA + GARCH provides the same coefficient estimates/forecasts as SARIMA, we will simply forecast for SARIMA. SARIMA + GARCH only reduces the variance in the coefficient estimates/forecasts.
+\newline
+
+```{r}
+# make predictions for next 12 time points
+sarima_prediction <- predict(model_sarima, n.ahead = 12)
+
+# create descriptions for table in dataframe format
+time_ahead <- c(1:12)
+sarima_prediction <- sarima_prediction$pred
+datatable <- data.frame(time_ahead, sarima_prediction)
+
+# create table
+datatable %>%
+  kable()
+```
+Table 7. Forecasts of the next 12 data points for SARIMA or SARIMA + GARCH model.
+\newpage
+
+## Forecasted Plot of SARIMA Model
+Below is the plot of the forecasts of the SARIMA or SARIMA + GARCH model.
+
+```{r}
+# forecasts
+y.pred = ts(predict(model_sarima, n.ahead = 12, se.fit = TRUE), frequency = 12,
+            start = c(2017, 9))
+
+# confidence intervals
+cil = ts((y.pred$pred - 1.96 * y.pred$se), start = c(2017, 9), frequency = 12)
+ciu = ts((y.pred$pred + 1.96 * y.pred$se), start = c(2017, 9), frequency = 12)
+
+ts.plot(cbind(dat_train.ts[ , 1], y.pred$pred, cil, ciu), lty = c(1, 2, 3, 3),
+        col = c("#619CFF", "#00BA38", "#F8766D", "#F8766D"), 
+        ylab = "# total new private houses (in 1000s)", main = "Forecas of Housing Starts using SARIMA + GARCH Model", xlab = "Year")
+
+
+```
+Figure 10. The forecasted plot of the SARIMA model.
+\newline
+
+Figure 10 shows the forecast of the SARIMA model. Note that although we also used SARIMA + GARCH model, SARIMA + GARCH model does not change the coefficeints of the estimates/forecasts; it only reduces the standard error. However, as of now, R does not have capability to forecast GARCH with seasonality time-series, rendering any outputted standard error absolutely useless since we are modeling with seasonality in our SARIMA model. An interesting feature of the plot is how large the confidence interval bands are; due to the high and inconsistent variance throughout the time plot, such a large range is required.
+\newline
+\newline
+
+## RMSE of SARIMA Model
+```{r}
+# RMSE calculation
+RMSE_value <- sqrt(sum((dat_test - y.pred$pred)^2)/12)
+
+# create descriptions for table in dataframe format
+model <- c("SARIMA")
+RMSE <- c(RMSE_value)
+datatable <- data.frame(model, RMSE)
+
+# create table
+datatable %>%
+  kable()
+
+```
+Table 8. RMSE value of SARIMA model's predictions against test data set.
+\newline
+
+Calculating the RMSE will tell us how accurate our prediction is. We use the test set data as the observed data and our forecasted data as predicted. Table 8 tells us that we obtain an RMSE value of 8.958358. Although this value is not meaningful in itself despite being a small number, we will compare this value to see relatively how accurate the SARIMA model is.
+
+# Modelling Regression with Autocorrelated Errors
+## Exploring Autocorrelated Features in Housing Starts
+```{r}
+# plot time plot
+par(mfrow = c(1, 2))
+plot.ts(dat_train.ts[ , 1], type = "l", ylab = "# of new private houses (in 1000s)",
+        main = "Time Plot of Housing Starts")
+acf(dat_train.ts[ , 1], main = "ACF of Housing Starts")
+```
+Figure 11. Time plot and ACF of the housing variable.
+\newline
+
+We revisit the time plot in Figure 11 in order to model based on its autocorrelated errors. We have already explored the main features of these tWo graphs in Sections 3.1 and 3.3, but as a quick refresher, the data is not stationary as there are many significant autocorrelations in the early lags. Seasonality is present and trend is uncertain.
+
+## Fit Classical Regression Model
+```{r}
+par(mfrow = c(1, 2))
+monthly <- cycle(dat_train.ts) # seasonal component
+
+# fit two classical regression models. one with only the 2 other variables, the other with seasonality as well
+model_classical <- lm(dat_train.ts[ , 1] ~ dat_train.ts[ , 2] + dat_train.ts[ , 3])
+model_classical2 <- lm(dat_train.ts[ , 1] ~ dat_train.ts[ , 2] + dat_train.ts[ , 3] + factor(monthly))
+
+# check ACFs to find better model
+acf(resid(model_classical), main = "ACF of classical regression model \nwith only uw and ur")
+acf(resid(model_classical2), main = "ACF of classical regression model \nwith uw, ur, and seasonality")
+```
+Figure 12. ACF plots of two candidate classical regression models.
+\newline
+
+Figure 12 shows two classical regression models: the one on the left only uses the other two variables (uw, ur), while the right model also includes seasonality. Comparing these two models to find the optimal one is necessary in order to move forward. The reason why there is a second model that captures seasonality is that from Figure 11, there is clear seasonality in the time plot that needs to be modelled. Trend is not included because there is no clear trend for the timeplot, so adding it does not make intuitive sense. Both of the ACFs are clearly nonstationary due to their many significant autocorrelations. However, for multiple time-series analyses, having stationary variables is not a prerequisite. Thus, from these two models, the right model looks better because it follows an AR structure which is easier to model. Disregarding the nonstationarity of it, the right plot identifies as an AR(1) model. Thus, we will proceed to correct the residuals by modelling an AR(1) model onto the classical regression model that incorporates uw, ur, and seasonality.
+
+## Fit AR(1) Model onto Classical Regression Model
+
+```{r}
+# fit AR(1) model onto classical regression model
+model_ar <- arima(ts(rstudent(model_classical2)), order = c(1, 0, 0))
+corARMA_coef <- model_ar$coef[1] # coefficient used for corARMA
+
+# ACF of residuals of AR(1) fit onto classical regression model
+acf(resid(model_ar), main = "ACF of AR(1) Model's Residuals onto Classical Regression Model")
+```
+Figure 13. ACF plot of AR(1) model's residuals onto classical regression model.
+\newline
+
+Figure 13 showcases the residuals obtained after fitting an AR(1) onto the classical regression model. Applying an AR(1) model will clarify the true structure of the data so that we can use the coefficient estimate of the AR(1) into a GLS model to explain other autocorrelations that is not explained by the other variables. Thus, this is not our final model since it hasn't yet taken into account that correlation.
+
+## Fit GLS using AR(1) Model Structure
+```{r, results = F, echo = F, warning = F, message = F}
+library(nlme)
+
+# fit GLS model using AR(1) coefficient
+model_gls <- gls(dat_train.ts[ , 1] ~ dat_train.ts[ , 2] + dat_train.ts[ , 3] + factor(monthly), correlation = corARMA((corARMA_coef), p = 1))
+```
+```{r}
+# plot ACF of resulting model
+acf(resid(model_gls), main = "ACF of GLS fit on Classical Regression Model \nusing AR(1) Model Structure")
+```
+Figure 14. ACF of GLS fit on classical regression model using AR(1) model structure.
+\newline
+
+The ACF from Figure 14 is not the most beautiful since it is not white noise, but it definitely highlights an AR structure as seen through its significant autocorrelations. Other models tried could not remove the structure of this pattern in the residuals, so this is the best GLS fit for this model. GLS fit a model on the original time-series by using the structure of the AR(1) model. Other AR models do not do a better job of fitting this data, and thus we choose the simplest model, which is this.
+\newpage
+
+## GLS Model Equation
+```{r, echo = F, message = F, warning = F, results = F}
+summary(model_gls)
+```
+
+The final GLS model obtained is as follows: 
+
+$hs = 114.72 + 1.66*uw - 5.89*ur + 3.08*Feb + 31.39*March + 45.05*April + 49.47*May + 50.78*June + 44.24*July + 40.86*August + 33.46*September + 37.37*October + 16.92*November + 1.48*December$
+
+where the month variables are dummy variables. Interestingly enough, in comparison to the first month, January, each month has a higher coefficient estimate, suggesting that winter months have lower housing starts, while the higher coefficient estimates, which are found in the summer months, have higher power. This conclusion is consistent with the analyses done on the seasonal boxplots in Table 3. Also interestingly, all variables in this model are significant (with a p-value less than 0.05) excpet for uw and December. This leads us to believe that most of these variables are truly useful in the model.
+\newline
+\newline
+
+## Forecasting GLS Model
+
+```{r}
+# forecasting future time points
+df_monthly <- data.frame(Monthly = rep(1:12, 1))# create out of sample data
+gls_pred <- predict(model_gls, df_monthly)[1:12]
+gls_prediction <- ts(gls_pred, start = c(2017, 9), frequency = 12)
+
+# create descriptions for table in dataframe format
+time_ahead <- c(1:12)
+datatable <- data.frame(time_ahead, gls_prediction)
+
+# create table
+datatable %>%
+  kable()
+```
+Table 9. Future forecasts using the GLS model.
+\newpage
+
+## Forecasted Plot of GLS Model
+```{r}
+# plot GLS model forecast
+ts.plot(dat_train.ts[ , 1], gls_prediction, 
+        col = c("#F8766D", "#00BA38"), main = "Forecast of Housing Starts using GLS Model", ylab="# of new private houses (in 1000s)", xlab = "Year")
+```
+Figure 15. Forecasted plot of GLS Model.
+\newline
+
+The green illustrates the forecasted data points of the GLS model, while the red are the training data. The forecasted data points seem to have higher variability than the cycles before it. Unfortunatley, finding confidence interval bands for GLS models is not yet doable in R. Regardless, the forecast seems to be a good fit because it follows the general trend of the time plot.
+\newline
+\newline
+
+## RMSE of GLS Model
+
+```{r}
+# RMSE calculation
+RMSE_value <- sqrt(sum((dat_test - gls_prediction)^2)/12)
+
+# create descriptions for table in dataframe format
+model <- c("GLS")
+RMSE <- c(RMSE_value)
+datatable <- data.frame(model, RMSE)
+
+# create table
+datatable %>%
+  kable()
+
+```
+Table 10. RMSE of the GLS model.
+\newline
+
+Compared to the RMSE of the SARIMA model, Table 10 indicates that the RMSE of the GLS model is higher, demonstrating that it is a weaker fit than the SARIMA model. This is not too surprising, given that finding the most optimal GLS model was nearly difficult when all of the model's residuals had some sort of AR(1) processes, completely devoid of any white noise pattern.
+\newpage
+
+# Modelling VAR
+## Identication of VAR Model
+We have already analyzed the time plots of the three variables in Table 2, but as a refresher, the three follow similar seasonal trends, leading us to believe that they are cointegrated. Table 5 proved to us to use the seasonal + regular differencing because it is the most stationary.
+
+```{r}
+# first difference
+reg.diff = diff(dat_train.ts, lag = 1, diff = 1)
+
+# seasonal difference
+seas.diff = diff(dat_train.ts, lag = 12, diff = 1)
+
+# seasonal difference of the regular difference
+seas.reg.diff = diff(reg.diff, lag = 12, diff = 1)
+acf(seas.reg.diff, lag = 50)
+```
+Figure 16. The ACFs and CCFs of the seasonal + regular differenced time-series.
+\newline
+
+Figure 16 shows that there exist some dependency among the endogenous variables. The variables are also dependent on themselves since they all damp down in a sinusoidal fashion. Identification of a model will be done by analyzing the lags that are significant for each plot.
+\newline
+\newline
+
+```{r}
+# create descriptions for table in dataframe format
+input <- c(rep("hs", 3), rep("uw", 3), rep("ur", 3))
+response <- rep(c("hs", "uw", "ur"), 3)
+lags <- c("1, 2", "4", "none", "2", "1, 2", "1", "2", "2, 3", "1, 2")
+
+datatable <- data.frame(input, response, lags)
+
+# create table
+datatable %>%
+  kable()
+```
+Table 11. Shows which variables are involved with each other, as inspected from their ACFs and CCFs.
+
+Based on Table 11, although there is one lag that goes until lag 3 and one that goes until lag 4, I will choose VAR(2) because most of the lags are only until t-1 and t-2.
+\newline
+\newline 
+
+## Fit VAR(2) Model
+```{r, warning = F, results = F, echo = F, message = F}
+# fit all possibilities
+library(vars)
+var_none = VAR(dat_train, p = 2, type = "none")
+var_trend = VAR(dat_train, p = 2, type = "trend")
+var_const = VAR(dat_train, p = 2, type = "const")
+var_both = VAR(dat_train, p = 2, type = "both")
+
+# evaluate ACF of residuals
+#acf(resid(var_none))
+#acf(resid(var_trend))
+acf(resid(var_const))
+#acf(resid(var_both))
+```
+Figure 17. ACFs and CCFs of VAR(2) with constant term.
+\newline
+
+Figure 17 is the best model in terms of white noise residuals in its ACFs and PACFs. The other three models (none, trend, both) are either not white noise or are more complex than constant term without significant improvement. This makes sense too, given Table 2, because there was no real trend in the timeplots, but the values did have a constant term from which they started.
+\newpage
+
+## Leading and Lagging Variables
+
+```{r, message = F, echo = F, warning = F, results = F}
+# find which variables are leading and which are lagging
+coef(var_const)
+var_const_sum <- summary(var_const)
+
+# which coefficients are significant
+names(which(var_const_sum[[2]]$hs$coefficients[ , 4] < 0.05))
+names(which(var_const_sum[[2]]$uw$coefficients[ , 4] < 0.05))
+names(which(var_const_sum[[2]]$ur$coefficients[ , 4] < 0.05))
+```
+```{r}
+# create descriptions for table in dataframe format
+input <- c(rep("hs", 3), rep("uw", 3), rep("ur", 3))
+response <- rep(c("hs", "uw", "ur"), 3)
+significant_lags <- c("1, 2", "1, 2", "1, 2", "none", "1, 2", "1", "1, 2", "1, 2", "1, 2")
+
+datatable <- data.frame(input, response, significant_lags)
+
+# create table
+datatable %>%
+  kable()
+```
+Table 12. Demonstrates the significant coefficients for each of the variables.
+\newline
+
+From Table 12, we can decipher which variables are leading which variables.
+\begin{description}
+  \item hs is leading uw and ur across both lags.
+  \item uw is leading ur across 1 lag
+  \item ur is leading hs and uw across both lags.
+\end{description}
+
+Thus, both hs and ur lead uw; also, a VAR(2) has fit well since there are many t-1 and t-2 significaint lags.
+\newline
+\newline
+
+## VAR(2) Model Equation
+The following equation makes up the final model to predict housing starts:
+
+$hs = 1.02760*\sf{hs_{t-1}} -0.13663*\sf{hs_{t-2}} + 6.27333*\sf{uw_{t-1}} - 9.62279*\sf{uw_{t-2}} -10.19133*\sf{ur_{t-1}} + 13.58082*\sf{ur_{t-2}}$
+
+All variables in this equation are significant. In comparing with the results we obtained in Section 3.2, our conclusions match up: these variables are cointegrated since they are all significant in each other's equations. Thus, the relations are not spurious and are genuine because there are leading and lagging variables.
+\newline
+\newline
+
+## Forecasting VAR Model
+```{r}
+# make predictions for next 12 time points
+var_prediction <- predict(var_const, n.ahead = 12)
+
+# create descriptions for table in dataframe format
+time_ahead <- c(1:12)
+var_prediction <- var_prediction$fcst$hs[ , 1]
+datatable <- data.frame(time_ahead, var_prediction)
+
+# create table
+datatable %>%
+  kable()
+```
+Table 13. Forecast estimates from the VAR(2) model.
+\newpage
+
+## Forecasted Plot of VAR Model
+```{r}
+# forecasts
+y.pred = ts(predict(var_const, n.ahead = 12, se.fit = TRUE), frequency = 12,
+            start = c(2017, 9))
+
+y.pred <- ts(y.pred$fcst$hs[,c("fcst", "lower", "upper")],
+                 start = c(2017,9), frequency = 12)
+ts.plot(cbind(dat_train.ts[ , 1], y.pred), lty = c(1,2,2,2), col = c("#00BA38", "#F8766D", "#619CFF", "#619CFF"), main = "Forecast of Housing Starts using VAR Model", ylab = "# new private houses (in 1000s)", xlab = "Year")
+
+```
+Figure 18. Forecasted values of estimates using VAR model.
+\newline
+
+Figure 18 shows the plot of VAR(2) forecasts. The confidence interval is also large due to the nature of high variance in the time plot. Overall though, it is still not a bad forecast as it seems to resemble the pattern of the time plot.
+\newline
+\newline
+
+## RMSE of VAR Model
+```{r}
+# RMSE calculation
+RMSE_value <- sqrt(sum((dat_test - y.pred[ , 1])^2)/12)
+
+# create descriptions for table in dataframe format
+model <- c("VAR")
+RMSE <- c(RMSE_value)
+datatable <- data.frame(model, RMSE)
+
+# create table
+datatable %>%
+  kable()
+```
+Table 14. RMSE value of VAR model.
+\newline
+
+Table 14 shows that the final RMSE for the VAR model is in between the other two models. This values of all three RMSE values are in the same ballpark, which helps ascertify that these forecasts together are more accurate.
+
+## Impulse Response Analysis
+```{r}
+# impulse response functions
+irf.hs <- irf(var_const, impulse = "hs", response = c("hs","uw","ur"), boot = FALSE, n.ahead = 100) 
+
+irf.uw <- irf(var_const, impulse = "uw", response = c("hs","uw","ur"), boot = FALSE, n.ahead = 100) 
+
+irf.ur <- irf(var_const, impulse = "ur", response = c("hs","uw","ur"), boot = FALSE, n.ahead = 100) 
+
+# plot them
+par(mfrow = c(3, 1))
+plot(irf.hs)
+plot(irf.uw)
+plot(irf.ur) 
+```
+Figure 19. The impulse response function plots for the three variables.
+\newline
+
+Figure 19 illustrates all the impulse response functions plots. Here are some interpretations to be drawn from them:
+
+A one unit increase in hs at time 0 does not affect uw or ur at all since these variables remain constant and stable and stay at their original states. It does, howveer, affect hs by starting with an initial increase that gradually dips down a bit below the original states until it very slowly climbs back up until it reaches its original state where it stabilizes around time 30.
+
+A one unit increase in uw at time 0 affects all three variables. In hs, there is a sudden drop from its original state until time 5, after which it steadily climbs back up to its original state and remains stable from time 70 onward. In both uw and ur, the impact starts a bit above the original state and gradually dips until it stabilizes to its original state after time 50.
+
+A one unit increase in ur at time 0 affects mostly only hs. uw and ur are slightly disturbed at time 2, but they quickly climb down to their original stable position from time 25 onward. hs, however, starts with a sudden dip below its original state until about itme 2, after which it rises and passes its original state at 4 and keeps increasing until time 13, after which it gradually comes down to its original, stable state from time 40 and onward.
+
+Piecing in all of these three analyses, we see that none of the variables have a permanent effect on the other since they all tend to go back to their original state soon. Moreover, only hs is most strikingly disturbed across all three variables, implying that all the variables have a huge affect on hs. uw also has some more power over all three variables, suggesting it has somewhat more of an influencing behavior than the other variables.
+
+\newpage
+# Forecasts and Conclusions
+## Conclusions
+```{r, warning = F}
+# Forecasts and Conclusions
+
+Time_Forecasted <- c("Sept 1, 2017", "Oct 1, 2017", "Nov 1, 2017", "Dec 1, 2017",
+                     "Jan 1, 2018", "Feb 1, 2018", "March 1, 2018", "April 1, 2018",
+                     "May 1, 2017", "June 1, 2017", "July 1, 2017", "Aug 1, 2017")
+
+# all columns
+SARIMA <- sarima_prediction
+Classical_Regression_with_GLS <- gls_pred
+VAR <- var_prediction
+Actual_Data <- dat_test
+Average <- apply(cbind(SARIMA, Classical_Regression_with_GLS, VAR, Actual_Data), 1, mean)
+
+# make dataframe
+datatable <- data.frame(cbind(Time_Forecasted, round(SARIMA, 2), round(Classical_Regression_with_GLS, 2), round(VAR, 2), round(Average, 2), round(Actual_Data, 2)))
+names(datatable) <- c("Time Forecasted", "SARIMA", "Classical Regression + GLS", "VAR", "Average", "Actual Data")
+
+# change class types
+#datatable$`Actual Data` <- as.vector(datatable$`Actual Data`)
+#datatable$Average <- as.vector(datatable$Average)
+
+# RMSE values
+RMSE <- data.frame("RMSE", round(8.958358, 2), round(32.47106, 2), round(11.49255, 3), round(sqrt(sum((as.numeric(datatable$Average) - as.numeric(datatable$`Actual Data`))^2)/12), 2), "N/A")
+names(RMSE) <- names(datatable)
+
+# create table
+datatable %>%
+  kable()
+
+# RMSE table
+RMSE %>%
+  kable()
+```
+Table 15. All forecasts from the three models, along with the average and the actual data, supplemented by the RMSE values.
+\newline
+
+Based off Table 15, we see that the model with the lowest RMSE is the SARIMA model. If I had to only choose one model and forecast, I would choose SARIMA. SARIMA also makes sense because it is the only that truly accounts for seasonality in both the AR and MA processes, unlike VAR. And from Table 2, it is clear that seasonality must be modelled. However, a more sound forecast is the average, or the "consensus" forecast of the three forecasts. This is the forecast I would use since it combines multiple metholodogies, overriding assumptions made for each model since no data can really be modelled perfectly to begin with.
+\newline
+\newline
+
+## Practical and Future Applications
+It's difficult to discern the importance of housing starts in the economy without actually using variables more directly involved in the economy. However, through our approach in VAR, we discussed how hs is a leading variable for ur and uw which are two variables somewhat representing the economy. Analyzing further to what extent hs plays an influence in the economy and market by introducing more variables could be a fascinating project.
